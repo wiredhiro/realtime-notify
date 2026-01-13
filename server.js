@@ -6,6 +6,9 @@ const { PubSub } = require('@google-cloud/pubsub');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// デモモード設定
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+
 // GCP Pub/Sub設定
 const projectId = process.env.GCP_PROJECT_ID;
 const topicName = process.env.PUBSUB_TOPIC || 'notifications';
@@ -17,6 +20,12 @@ let subscription;
 
 // Pub/Sub初期化
 async function initPubSub() {
+  // デモモードではPub/Subを初期化しない
+  if (DEMO_MODE) {
+    console.log('デモモード: Pub/Sub初期化をスキップ');
+    return false;
+  }
+
   try {
     pubsub = new PubSub({ projectId });
 
@@ -125,11 +134,35 @@ app.get('/events', (req, res) => {
     type: 'connected',
     clientId,
     message: '接続しました',
-    pubsubEnabled: !!subscription
+    pubsubEnabled: !!subscription,
+    demoMode: DEMO_MODE
   })}\n\n`);
 
   clients.set(clientId, res);
   console.log(`クライアント接続: ${clientId} (現在: ${clients.size})`);
+
+  // デモモードの場合、初回接続時にウェルカム通知を送信し、サンプル通知を順次配信
+  if (DEMO_MODE) {
+    setTimeout(() => {
+      const welcomeNotification = {
+        type: 'notification',
+        data: {
+          id: `demo_welcome_${Date.now()}`,
+          title: 'デモモードへようこそ',
+          message: 'これはデモ環境です。サンプルの通知が表示されます。',
+          notificationType: 'info',
+          timestamp: new Date().toISOString(),
+          source: 'demo'
+        }
+      };
+      try {
+        res.write(`data: ${JSON.stringify(welcomeNotification)}\n\n`);
+      } catch (e) {}
+    }, 1000);
+
+    // サンプル通知を順次送信（各1回のみ）
+    sendDemoNotificationsToClient(res);
+  }
 
   req.on('close', () => {
     clients.delete(clientId);
@@ -139,6 +172,14 @@ app.get('/events', (req, res) => {
 
 // 通知送信エンドポイント（Pub/Sub経由）
 app.post('/notify', async (req, res) => {
+  // デモモードでは送信を拒否
+  if (DEMO_MODE) {
+    return res.status(403).json({
+      error: 'デモモードでは通知の送信はできません',
+      demoMode: true
+    });
+  }
+
   const { title, message, type = 'info' } = req.body;
 
   if (!message) {
@@ -184,6 +225,11 @@ app.post('/notify', async (req, res) => {
 
 // Pub/Sub Push エンドポイント（Cloud Runで使用）
 app.post('/pubsub/push', (req, res) => {
+  // デモモードでは受け付けない
+  if (DEMO_MODE) {
+    return res.status(403).json({ error: 'Demo mode', demoMode: true });
+  }
+
   try {
     const pubsubMessage = req.body.message;
     if (!pubsubMessage) {
@@ -225,15 +271,56 @@ app.get('/health', (req, res) => {
     status: 'ok',
     connections: clients.size,
     pubsubEnabled: !!subscription,
-    projectId: projectId || 'not set'
+    projectId: projectId || 'not set',
+    demoMode: DEMO_MODE
   });
 });
+
+// デモモード状態を返すエンドポイント
+app.get('/api/config', (req, res) => {
+  res.json({
+    demoMode: DEMO_MODE
+  });
+});
+
+// デモ用サンプル通知データ（日常会話風）
+const DEMO_NOTIFICATIONS = [
+  { title: '田中さん', message: 'お疲れさまです！例の資料、確認できました。ありがとうございます。', type: 'info' },
+  { title: '佐藤さん', message: '明日のミーティング、15時からでよかったですよね？', type: 'info' },
+  { title: '山田さん', message: 'ランチ行きませんか？新しいカフェができたらしいです', type: 'success' },
+  { title: '鈴木さん', message: '先ほどの件、確認できました。問題なさそうです！', type: 'success' },
+];
+
+// デモモードで新規クライアントにサンプル通知を順次送信（各1回のみ）
+function sendDemoNotificationsToClient(clientRes) {
+  if (!DEMO_MODE) return;
+
+  DEMO_NOTIFICATIONS.forEach((sample, index) => {
+    setTimeout(() => {
+      const notification = {
+        type: 'notification',
+        data: {
+          id: `demo_${Date.now()}_${index}`,
+          title: sample.title,
+          message: sample.message,
+          notificationType: sample.type,
+          timestamp: new Date().toISOString(),
+          source: 'demo'
+        }
+      };
+      try {
+        clientRes.write(`data: ${JSON.stringify(notification)}\n\n`);
+      } catch (e) {}
+    }, 3000 + (index * 5000)); // 3秒後から5秒間隔で送信
+  });
+}
 
 // サーバー起動
 async function start() {
   await initPubSub();
 
   app.listen(PORT, () => {
+    const modeText = DEMO_MODE ? 'デモモード' : (subscription ? '有効' : '無効（ローカルモード）');
     console.log(`
 ╔══════════════════════════════════════════════════════╗
 ║  GCP Pub/Sub リアルタイム通知サービス                  ║
@@ -241,7 +328,7 @@ async function start() {
 ║  URL: http://localhost:${PORT}                          ║
 ║  Project: ${(projectId || 'not set').padEnd(40)}║
 ║  Topic: ${topicName.padEnd(43)}║
-║  Pub/Sub: ${subscription ? '有効' : '無効（ローカルモード）'}                             ║
+║  Mode: ${modeText.padEnd(44)}║
 ╠══════════════════════════════════════════════════════╣
 ║  エンドポイント:                                       ║
 ║  - GET  /events        SSE接続                        ║

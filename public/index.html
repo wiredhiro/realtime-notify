@@ -261,11 +261,86 @@
     .notification-source.pubsub {
       color: #1d4ed8;
     }
+
+    .notification-source.demo {
+      color: #9333ea;
+    }
+
+    /* デモモードバナー */
+    .demo-banner {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: white;
+      padding: 12px 20px;
+      text-align: center;
+      font-weight: 600;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+      display: none;
+    }
+
+    .demo-banner.visible {
+      display: block;
+    }
+
+    .demo-banner a {
+      color: white;
+      text-decoration: underline;
+    }
+
+    /* デモモード時のフォーム */
+    .card.demo-disabled {
+      opacity: 0.7;
+      position: relative;
+    }
+
+    .card.demo-disabled::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 10px;
+      cursor: not-allowed;
+    }
+
+    .demo-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 15px 25px;
+      border-radius: 8px;
+      font-weight: 600;
+      z-index: 10;
+      display: none;
+    }
+
+    .card.demo-disabled .demo-overlay {
+      display: block;
+    }
+
+    .demo-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: #fef3c7;
+      color: #b45309;
+      margin-left: 8px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>GCP Pub/Sub リアルタイム通知</h1>
+
+    <div class="demo-banner" id="demoBanner">
+      デモモードで動作中 - サンプル通知が自動的に表示されます。通知の送信はできません。
+    </div>
 
     <div class="status-bar">
       <div class="status-indicator">
@@ -276,8 +351,9 @@
       <div class="client-id" id="clientId">-</div>
     </div>
 
-    <div class="card">
+    <div class="card" id="notifyCard">
       <h2>通知を送信</h2>
+      <div class="demo-overlay">デモモードでは送信できません</div>
       <form id="notifyForm">
         <div class="form-group">
           <label for="title">タイトル</label>
@@ -297,7 +373,7 @@
           </select>
         </div>
         <div class="btn-group">
-          <button type="submit">全員に送信</button>
+          <button type="submit" id="submitBtn">全員に送信</button>
           <button type="button" class="btn-secondary" onclick="clearNotifications()">通知をクリア</button>
         </div>
       </form>
@@ -320,6 +396,17 @@
     const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     let eventSource = null;
     let isConnected = false;
+    let isDemoMode = false;
+
+    function enableDemoMode() {
+      isDemoMode = true;
+      document.getElementById('demoBanner').classList.add('visible');
+      document.getElementById('notifyCard').classList.add('demo-disabled');
+      document.getElementById('submitBtn').disabled = true;
+      document.getElementById('title').disabled = true;
+      document.getElementById('message').disabled = true;
+      document.getElementById('type').disabled = true;
+    }
 
     function updateStatus(connected) {
       isConnected = connected;
@@ -363,6 +450,10 @@
           if (data.type === 'connected') {
             updateStatus(true);
             updatePubSubStatus(data.pubsubEnabled);
+            // デモモードの場合はUIを無効化
+            if (data.demoMode) {
+              enableDemoMode();
+            }
           } else if (data.type === 'notification') {
             addNotification(data.data);
           }
@@ -397,10 +488,15 @@
       const time = new Date(notification.timestamp).toLocaleTimeString('ja-JP');
 
       const notificationEl = document.createElement('div');
-      const sourceLabel = notification.source === 'pubsub' || notification.source === 'pubsub-push'
-        ? 'via Pub/Sub'
-        : 'direct';
-      const sourceClass = notification.source?.includes('pubsub') ? 'pubsub' : '';
+      let sourceLabel = 'direct';
+      let sourceClass = '';
+      if (notification.source === 'pubsub' || notification.source === 'pubsub-push') {
+        sourceLabel = 'via Pub/Sub';
+        sourceClass = 'pubsub';
+      } else if (notification.source === 'demo') {
+        sourceLabel = 'demo sample';
+        sourceClass = 'demo';
+      }
 
       notificationEl.className = `notification ${notification.notificationType}`;
       notificationEl.innerHTML = `
@@ -445,6 +541,12 @@
     document.getElementById('notifyForm').addEventListener('submit', async (e) => {
       e.preventDefault();
 
+      // デモモードでは送信しない
+      if (isDemoMode) {
+        alert('デモモードでは通知の送信はできません');
+        return;
+      }
+
       const title = document.getElementById('title').value;
       const message = document.getElementById('message').value;
       const type = document.getElementById('type').value;
@@ -459,6 +561,10 @@
         });
 
         const result = await response.json();
+        if (result.demoMode) {
+          alert('デモモードでは通知の送信はできません');
+          return;
+        }
         if (result.success) {
           document.getElementById('message').value = '';
           document.getElementById('title').value = '';

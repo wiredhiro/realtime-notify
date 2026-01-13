@@ -15,6 +15,43 @@
 - gcloud CLI インストール済み
 - Node.js 18以上
 
+## デモモード
+
+第三者にアプリを公開する際、GCPリソースへの書き込みを防ぎたい場合は**デモモード**を使用します。
+
+### デモモードの特徴
+
+- 通知送信フォームが無効化される（UIはグレーアウト表示）
+- `/notify`エンドポイントへのPOSTが拒否される
+- Pub/Sub初期化がスキップされる（GCPへの接続なし）
+- 接続時にサンプル通知が自動的に表示される
+
+### デモモードの有効化
+
+```bash
+# 環境変数で設定
+DEMO_MODE=true npm start
+
+# または.envファイルで設定
+echo "DEMO_MODE=true" >> .env
+npm start
+```
+
+### Cloud Runでデモモードを使用
+
+```bash
+gcloud run deploy realtime-notify \
+  --source . \
+  --region asia-northeast1 \
+  --platform managed \
+  --allow-unauthenticated \
+  --set-env-vars "DEMO_MODE=true"
+```
+
+デモモードではGCP認証情報やPub/Sub設定は不要です。
+
+---
+
 ## ローカル開発
 
 ### 1. 依存関係のインストール
